@@ -3,6 +3,7 @@ import io
 import base64
 import json
 import time
+import re
 from flask import Flask, request, jsonify, render_template_string, make_response
 from google import genai
 from google.genai import types
@@ -122,7 +123,7 @@ def receive_image_and_analyze():
         # メモリ消費を抑えるため画像サイズを最大800pxにリサイズ
         image.thumbnail((800, 800))
 
-        # 表示用 Base64 文字列を生成（圧縮済みの画像を使用）
+        # 表示用 Base64 文字列を生成
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG", quality=80)
         b64_img = base64.b64encode(buffered.getvalue()).decode('utf-8')
@@ -154,7 +155,11 @@ def receive_image_and_analyze():
                 else:
                     raise e
 
-        res_data = json.loads(response.text)
+        # 返却テキストからマークダウン記法(```json ... ```)を整形除去
+        raw_text = response.text.strip()
+        cleaned_text = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw_text, flags=re.MULTILINE).strip()
+
+        res_data = json.loads(cleaned_text)
 
         latest_result = {
             "has_data": True,
