@@ -2,14 +2,15 @@ import os
 import io
 import base64
 import json
-from flask import Flask, request, jsonify, render_template_string, make_response
+import time
+from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 from PIL import Image
 
 app = Flask(__name__)
 
-# Gemini APIキー（Renderの環境変数から安全に取得）
+# Gemini APIキー（Renderの環境変数から取得）
 API_KEY = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=API_KEY)
 
@@ -110,26 +111,36 @@ def receive_image_and_analyze():
 
     print("画像を受信しました。AIで解析中...")
 
+    prompt = """
+    この画像を分析し、以下の質問に答えてください。
+    1. 熊（ツキノワグマ、ヒグマなど）が写っていますか？
+    2. 何が写っているか簡単に説明してください。特徴も踏まえて
+
+    回答は必ず以下のJSONフォーマットのみで返してください。
+    {"is_bear": true/false, "confidence": 0.0〜1.0, "description": "説明文"}
+    """
+
     try:
         image = Image.open(io.BytesIO(image_bytes))
 
-        prompt = """
-        この画像を分析し、以下の質問に答えてください。
-        1. 熊（ツキノワグマ、ヒグマなど）が写っていますか？
-        2. 何が写っているか簡単に説明してください。特徴も踏まえて
-
-        回答は必ず以下のJSONフォーマットのみで返してください。
-        {"is_bear": true/false, "confidence": 0.0〜1.0, "description": "説明文"}
-        """
-
-        # 正しい安定モデル名（gemini-2.5-flash）に変更
-        response = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=[image, prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
+        # 503エラー（混雑）対策のリトライ処理（最大3回）
+        response = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=[image, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                break
+            except Exception as e:
+                if "503" in str(e) and attempt < 2:
+                    print(f"503エラー検出。2秒後に再試行します... (試行 {attempt + 1}/3)")
+                    time.sleep(2)
+                else:
+                    raise e
 
         res_data = json.loads(response.text)
         b64_img = base64.b64encode(image_bytes).decode('utf-8')
