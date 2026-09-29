@@ -3,14 +3,14 @@ import io
 import base64
 import json
 import time
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, make_response
 from google import genai
 from google.genai import types
 from PIL import Image
 
 app = Flask(__name__)
 
-# Gemini APIキー（Renderの環境変数から取得）
+# Gemini APIキー（環境変数から取得）
 API_KEY = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=API_KEY)
 
@@ -47,9 +47,10 @@ HTML_TEMPLATE = """
     <script>
         async function fetchStatus() {
             try {
-                const response = await fetch('/api/status');
+                const response = await fetch('/api/status', {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
                 const data = await response.json();
-
                 const contentDiv = document.getElementById('content');
 
                 if (!data.has_data) {
@@ -95,11 +96,15 @@ HTML_TEMPLATE = """
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    response = make_response(render_template_string(HTML_TEMPLATE))
+    response.headers['ngrok-skip-browser-warning'] = 'true'
+    return response
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    return jsonify(latest_result)
+    response = make_response(jsonify(latest_result))
+    response.headers['ngrok-skip-browser-warning'] = 'true'
+    return response
 
 @app.route('/', methods=['POST'])
 def receive_image_and_analyze():
@@ -111,19 +116,26 @@ def receive_image_and_analyze():
 
     print("画像を受信しました。AIで解析中...")
 
-    prompt = """
-    この画像を分析し、以下の質問に答えてください。
-    1. 熊（ツキノワグマ、ヒグマなど）が写っていますか？
-    2. 何が写っているか簡単に説明してください。特徴も踏まえて
-
-    回答は必ず以下のJSONフォーマットのみで返してください。
-    {"is_bear": true/false, "confidence": 0.0〜1.0, "description": "説明文"}
-    """
-
     try:
         image = Image.open(io.BytesIO(image_bytes))
 
-        # 推奨モデル（gemini-3.8-flash）と503混雑時の自動リトライ処理（最大3回）
+        # メモリ消費を抑えるため画像サイズを最大800pxにリサイズ
+        image.thumbnail((800, 800))
+
+        # 表示用 Base64 文字列を生成（圧縮済みの画像を使用）
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG", quality=80)
+        b64_img = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+        prompt = """
+        この画像を分析し、以下の質問に答えてください。
+        1. 熊（ツキノワグマ、ヒグマなど）が写っていますか？
+        2. 何が写っているか簡単に説明してください。特徴も踏まえて
+
+        回答は必ず以下のJSONフォーマットのみで返してください。
+        {"is_bear": true/false, "confidence": 0.0〜1.0, "description": "説明文"}
+        """
+
         response = None
         for attempt in range(3):
             try:
@@ -143,7 +155,6 @@ def receive_image_and_analyze():
                     raise e
 
         res_data = json.loads(response.text)
-        b64_img = base64.b64encode(image_bytes).decode('utf-8')
 
         latest_result = {
             "has_data": True,
@@ -153,7 +164,9 @@ def receive_image_and_analyze():
             "image_b64": b64_img
         }
 
-        return jsonify(res_data), 200
+        res = make_response(jsonify(res_data), 200)
+        res.headers['ngrok-skip-browser-warning'] = 'true'
+        return res
 
     except Exception as e:
         print(f"エラー: {e}")
