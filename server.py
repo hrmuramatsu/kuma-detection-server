@@ -124,7 +124,7 @@ def receive_image_and_analyze():
 
         # 正しい安定モデル名（gemini-2.5-flash）に変更
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.8-flash',
             contents=[image, prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
