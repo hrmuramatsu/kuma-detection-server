@@ -24,7 +24,6 @@ latest_result = {
     'image_b64': '',
 }
 
-# HTMLテンプレート
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -95,43 +94,40 @@ HTML_TEMPLATE = """
 </html>
 """
 
-
 @app.route('/', methods=['GET'])
 def index():
-  response = make_response(render_template_string(HTML_TEMPLATE))
-  response.headers['ngrok-skip-browser-warning'] = 'true'
-  return response
-
+    response = make_response(render_template_string(HTML_TEMPLATE))
+    response.headers['ngrok-skip-browser-warning'] = 'true'
+    return response
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-  response = make_response(jsonify(latest_result))
-  response.headers['ngrok-skip-browser-warning'] = 'true'
-  return response
-
+    response = make_response(jsonify(latest_result))
+    response.headers['ngrok-skip-browser-warning'] = 'true'
+    return response
 
 @app.route('/', methods=['POST'])
 def receive_image_and_analyze():
-  global latest_result
+    global latest_result
 
-  image_bytes = request.data
-  if not image_bytes:
-    return jsonify({'error': 'No image received'}), 400
+    image_bytes = request.data
+    if not image_bytes:
+        return jsonify({'error': 'No image received'}), 400
 
-  print('画像を受信しました。AIで解析中...')
+    print('画像を受信しました。AIで解析中...')
 
-  try:
-    image = Image.open(io.BytesIO(image_bytes))
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
 
-    # メモリ消費を抑えるため画像サイズを最大800pxにリサイズ
-    image.thumbnail((800, 800))
+        # メモリ削減のため最大600pxにリサイズ
+        image.thumbnail((600, 600))
 
-    # 表示用 Base64 文字列を生成
-    buffered = io.BytesIO()
-    image.save(buffered, format='JPEG', quality=80)
-    b64_img = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        # Base64生成（画質を65%に抑えて軽量化）
+        buffered = io.BytesIO()
+        image.save(buffered, format='JPEG', quality=65)
+        b64_img = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-    prompt = """
+        prompt = """
         この画像を分析し、以下の質問に答えてください。
         1. 熊（ツキノワグマ、ヒグマなど）が写っていますか？
         2. 何が写っているか簡単に説明してください。特徴も踏まえて
@@ -140,50 +136,45 @@ def receive_image_and_analyze():
         {"is_bear": true/false, "confidence": 0.0〜1.0, "description": "説明文"}
         """
 
-    response = None
-    for attempt in range(3):
-      try:
-        response = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=[image, prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type='application/json'
-            ),
-        )
-        break
-      except Exception as e:
-        if '503' in str(e) and attempt < 2:
-          print(
-              f'503エラー検出。2秒後に再試行します... (試行'
-              f' {attempt + 1}/3)'
-          )
-          time.sleep(2)
-        else:
-          raise e
+        response = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-3.8-flash',
+                    contents=[image, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type='application/json'
+                    ),
+                )
+                break
+            except Exception as e:
+                print(f"APIエラー(試行 {attempt + 1}/3): {e}")
+                if attempt < 2:
+                    time.sleep(3)
+                else:
+                    raise e
 
-    # 文頭の ```json や 文末の ``` を安全に除去
-    raw_text = response.text.strip()
-    cleaned_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
-    cleaned_text = re.sub(r'\s*```$', '', cleaned_text).strip()
+        raw_text = response.text.strip()
+        cleaned_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
+        cleaned_text = re.sub(r'\s*```$', '', cleaned_text).strip()
 
-    res_data = json.loads(cleaned_text)
+        res_data = json.loads(cleaned_text)
 
-    latest_result = {
-        'has_data': True,
-        'is_bear': res_data.get('is_bear', False),
-        'confidence': res_data.get('confidence', 0),
-        'description': res_data.get('description', ''),
-        'image_b64': b64_img,
-    }
+        latest_result = {
+            'has_data': True,
+            'is_bear': res_data.get('is_bear', False),
+            'confidence': res_data.get('confidence', 0),
+            'description': res_data.get('description', ''),
+            'image_b64': b64_img,
+        }
 
-    res = make_response(jsonify(res_data), 200)
-    res.headers['ngrok-skip-browser-warning'] = 'true'
-    return res
+        res = make_response(jsonify(res_data), 200)
+        res.headers['ngrok-skip-browser-warning'] = 'true'
+        return res
 
-  except Exception as e:
-    print(f'エラー: {e}')
-    return jsonify({'error': str(e)}), 500
-
+    except Exception as e:
+        print(f'解析エラー発生: {e}')
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-  app.run(host='0.0.0.0', port=8000)
+    app.run(host='0.0.0.0', port=8000)
