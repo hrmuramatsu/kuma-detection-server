@@ -9,8 +9,8 @@ from PIL import Image
 
 app = Flask(__name__)
 
-# Gemini APIキー
-API_KEY = "GEMINI_API_KEY"
+# Gemini APIキー（Renderの環境変数から安全に取得）
+API_KEY = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=API_KEY)
 
 # 最新の解析結果を保存する変数
@@ -22,7 +22,7 @@ latest_result = {
     "image_b64": ""
 }
 
-# HTMLテンプレート（画面チラつき防止 & ngrok警告対策版）
+# HTMLテンプレート
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -44,15 +44,9 @@ HTML_TEMPLATE = """
     </style>
 
     <script>
-        // 5秒ごとにバックグラウンドで最新データを取得して部分更新（チラつきなし）
         async function fetchStatus() {
             try {
-                // ngrok警告回避ヘッダーを付与してリクエスト
-                const response = await fetch('/api/status', {
-                    headers: {
-                        'ngrok-skip-browser-warning': 'true'
-                    }
-                });
+                const response = await fetch('/api/status');
                 const data = await response.json();
 
                 const contentDiv = document.getElementById('content');
@@ -83,9 +77,7 @@ HTML_TEMPLATE = """
             }
         }
 
-        // 5秒ごとに自動実行
         setInterval(fetchStatus, 5000);
-        // 初回読み込み時にも即時実行
         window.onload = fetchStatus;
     </script>
 </head>
@@ -102,17 +94,11 @@ HTML_TEMPLATE = """
 
 @app.route('/', methods=['GET'])
 def index():
-    response = make_response(render_template_string(HTML_TEMPLATE))
-    # ngrok警告画面を回避するレスポンスヘッダーを追加
-    response.headers['ngrok-skip-browser-warning'] = 'true'
-    return response
+    return render_template_string(HTML_TEMPLATE)
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    response = make_response(jsonify(latest_result))
-    # APIリクエスト側にも警告回避ヘッダーを追加
-    response.headers['ngrok-skip-browser-warning'] = 'true'
-    return response
+    return jsonify(latest_result)
 
 @app.route('/', methods=['POST'])
 def receive_image_and_analyze():
@@ -136,8 +122,9 @@ def receive_image_and_analyze():
         {"is_bear": true/false, "confidence": 0.0〜1.0, "description": "説明文"}
         """
 
+        # 正しい安定モデル名（gemini-2.5-flash）に変更
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-2.5-flash',
             contents=[image, prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
@@ -155,9 +142,7 @@ def receive_image_and_analyze():
             "image_b64": b64_img
         }
 
-        res = make_response(jsonify(res_data), 200)
-        res.headers['ngrok-skip-browser-warning'] = 'true'
-        return res
+        return jsonify(res_data), 200
 
     except Exception as e:
         print(f"エラー: {e}")
