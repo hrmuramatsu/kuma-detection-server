@@ -123,12 +123,12 @@ def receive_image_and_analyze():
     try:
         image = Image.open(io.BytesIO(image_bytes))
 
-        # 503エラー（混雑）対策のリトライ処理（最大3回）
+        # 推奨モデル（gemini-3.8-flash）と503混雑時の自動リトライ処理（最大3回）
         response = None
         for attempt in range(3):
             try:
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash',
+                    model='gemini-3.8-flash',
                     contents=[image, prompt],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
